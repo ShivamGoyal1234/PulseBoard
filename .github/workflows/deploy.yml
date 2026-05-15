@@ -67,17 +67,9 @@ jobs:
             echo "==> Step: git checkout ${REF}"
             git checkout "${REF}"
 
-            COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml)
-
-            echo "==> Step: ensure postgres is up and healthy"
-            "${COMPOSE[@]}" up -d postgres
-            until "${COMPOSE[@]}" exec -T postgres pg_isready -U "${POSTGRES_USER:-pulseBoard}" -d "${POSTGRES_DB:-pulseBoard}" >/dev/null 2>&1; do
-              sleep 2
-            done
-
-            echo "==> Step: run database migrations"
-            "${COMPOSE[@]}" run --rm migrate
-
             echo "==> Step: docker compose up --build"
-            "${COMPOSE[@]}" up -d --build --remove-orphans
+            docker compose \
+              --env-file "$ENV_FILE" \
+              -f docker-compose.prod.yml \
+              up -d --build --remove-orphans
             echo "==> Deploy script finished OK"
