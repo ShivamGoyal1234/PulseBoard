@@ -1,0 +1,107 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pulseBoard
+      POSTGRES_USER: pulseBoard
+      POSTGRES_PASSWORD: pulseBoard
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pulseBoard']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - '9092:9092'
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ['CMD-SHELL', 'kafka-topics --bootstrap-server localhost:9092 --list']
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - '8080:8080'
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: pulseBoard-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    env_file: ./apps/api/.env
+    environment:
+      DATABASE_URL: postgresql://pulseBoard:pulseBoard@postgres:5432/pulseBoard
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:29092
+    volumes:
+      - ./:/app
+      - pulseboard_node_modules:/app/node_modules
+      - pulseboard_api_nm:/app/apps/api/node_modules
+
+  web:
+    depends_on:
+      - api
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: development
+    ports:
+      - '5173:5173'
+    env_file: ./apps/web/.env
+    volumes:
+      - ./:/app
+      - pulseboard_node_modules:/app/node_modules
+      - pulseboard_web_nm:/app/apps/web/node_modules
+
+volumes:
+  postgres_data:
+  pulseboard_node_modules:
+  pulseboard_api_nm:
+  pulseboard_web_nm:

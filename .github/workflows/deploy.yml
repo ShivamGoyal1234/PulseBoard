@@ -1,0 +1,66 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Uses .env.{environment} on the VPS (same directory as compose file)
+        required: true
+        default: production
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve target env file name
+        id: env_name
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=production" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy over SSH (git fetch + checkout + docker compose)
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          REF: ${{ github.sha }}
+          APP_DIR: ${{ secrets.VPS_APP_DIR }}
+          ENV_SUFFIX: ${{ steps.env_name.outputs.name }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: REF,APP_DIR,ENV_SUFFIX
+          script_stop: true
+          script: |
+            set -euo pipefail
+            if [ -z "${APP_DIR:-}" ]; then echo "Missing VPS_APP_DIR secret" >&2; exit 1; fi
+            if [ -z "${REF:-}" ]; then echo "Missing REF" >&2; exit 1; fi
+            cd "${APP_DIR}"
+            test -f docker-compose.prod.yml
+
+            ENV_FILE=".env.${ENV_SUFFIX}"
+            if [ ! -f "$ENV_FILE" ]; then
+              echo "Missing $PWD/$ENV_FILE — create this file on the server before deploying." >&2
+              exit 1
+            fi
+
+            git fetch origin
+            git checkout "${REF}"
+
+            docker compose \
+              --env-file "$ENV_FILE" \
+              -f docker-compose.prod.yml \
+              up -d --build --remove-orphans

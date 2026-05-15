@@ -1,0 +1,1359 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "PulseBoard API",
+    "description": "REST API for PulseBoard: authentication (JWT + refresh cookie), poll CRUD, anonymous or authenticated responses, and analytics. WebSocket real-time updates are not described here.\n\n**Auth:** Protected routes expect `Authorization: Bearer <access_token>`. Register/login set an HTTP-only `refreshToken` cookie used by `POST /api/auth/refresh`.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3001",
+      "description": "Local development"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Registration, login, JWT refresh (cookie), password reset, OAuth Google, and current user."
+    },
+    {
+      "name": "Polls",
+      "description": "Create, list, read, update, delete, and publish polls."
+    },
+    {
+      "name": "Responses",
+      "description": "Submit answers to a poll (optional fingerprint and optional bearer for identified respondents)."
+    },
+    {
+      "name": "Analytics",
+      "description": "Aggregates, published results, AI insights, and operator DLQ tools."
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT access token returned from register, login, refresh, or OAuth callback query param."
+      }
+    },
+    "schemas": {
+      "ErrorMessage": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string", "description": "Human-readable error message" }
+        }
+      },
+      "ValidationError": {
+        "type": "object",
+        "required": ["error", "details"],
+        "properties": {
+          "error": { "type": "string", "example": "Validation failed" },
+          "details": {
+            "type": "object",
+            "description": "Zod flatten() output",
+            "additionalProperties": true
+          }
+        }
+      },
+      "ValidationErrorDomain": {
+        "type": "object",
+        "required": ["error", "missing"],
+        "properties": {
+          "error": { "type": "string", "example": "Validation failed" },
+          "missing": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Question IDs not answered but required"
+          }
+        }
+      },
+      "AccessTokenResponse": {
+        "type": "object",
+        "required": ["accessToken"],
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "description": "JWT access token (short-lived)"
+          }
+        }
+      },
+      "OkResponse": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {
+          "ok": { "type": "boolean", "enum": [true] }
+        }
+      },
+      "ForgotPasswordResponse": {
+        "type": "object",
+        "required": ["ok", "message"],
+        "properties": {
+          "ok": { "type": "boolean", "enum": [true] },
+          "message": {
+            "type": "string",
+            "example": "If an account exists for this email, we sent reset instructions."
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "description": "User row as stored and returned on GET /api/auth/me (includes password hash when present).",
+        "required": ["id", "email", "name", "provider", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "passwordHash": {
+            "type": ["string", "null"],
+            "description": "Present for email/password users; null for OAuth-only users"
+          },
+          "name": { "type": "string" },
+          "avatarUrl": { "type": ["string", "null"] },
+          "googleId": { "type": ["string", "null"] },
+          "provider": { "type": "string", "example": "email" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "MeResponse": {
+        "type": "object",
+        "required": ["user"],
+        "properties": {
+          "user": { "$ref": "#/components/schemas/User" }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["email", "password", "name"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 8 },
+          "name": { "type": "string", "minLength": 2, "maxLength": 50 }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 1 }
+        }
+      },
+      "ForgotPasswordRequest": {
+        "type": "object",
+        "required": ["email"],
+        "properties": {
+          "email": { "type": "string", "format": "email" }
+        }
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "required": ["token", "password"],
+        "properties": {
+          "token": { "type": "string", "minLength": 32 },
+          "password": { "type": "string", "minLength": 8 }
+        }
+      },
+      "PollOptionInput": {
+        "type": "object",
+        "required": ["text", "order"],
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "order": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "PollQuestionInput": {
+        "type": "object",
+        "required": ["text", "order", "options"],
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "isRequired": { "type": "boolean", "default": true },
+          "order": { "type": "integer", "minimum": 0 },
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 10,
+            "items": { "$ref": "#/components/schemas/PollOptionInput" }
+          }
+        }
+      },
+      "CreatePollRequest": {
+        "type": "object",
+        "required": ["title", "expiresAt", "questions"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": { "type": "string", "maxLength": 1000 },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 datetime with offset"
+          },
+          "isAnonymous": { "type": "boolean", "default": false },
+          "showResults": { "type": "boolean", "default": false },
+          "questions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": { "$ref": "#/components/schemas/PollQuestionInput" }
+          }
+        }
+      },
+      "UpdatePollRequest": {
+        "type": "object",
+        "description": "Partial update; questions cannot be changed via this endpoint.",
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": { "type": "string", "maxLength": 1000 },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "isAnonymous": { "type": "boolean" },
+          "showResults": { "type": "boolean" }
+        }
+      },
+      "PollOption": {
+        "type": "object",
+        "required": ["id", "questionId", "text", "order"],
+        "properties": {
+          "id": { "type": "string" },
+          "questionId": { "type": "string" },
+          "text": { "type": "string" },
+          "order": { "type": "integer" }
+        }
+      },
+      "PollQuestion": {
+        "type": "object",
+        "required": ["id", "pollId", "text", "isRequired", "order", "options"],
+        "properties": {
+          "id": { "type": "string" },
+          "pollId": { "type": "string" },
+          "text": { "type": "string" },
+          "isRequired": { "type": "boolean" },
+          "order": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "options": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PollOption" }
+          }
+        }
+      },
+      "Poll": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "creatorId",
+          "isAnonymous",
+          "isPublished",
+          "isActive",
+          "showResults",
+          "expiresAt",
+          "createdAt",
+          "updatedAt",
+          "questions"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "creatorId": { "type": "string" },
+          "isAnonymous": { "type": "boolean" },
+          "isPublished": { "type": "boolean" },
+          "isActive": { "type": "boolean" },
+          "showResults": { "type": "boolean" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "questions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PollQuestion" }
+          }
+        }
+      },
+      "PollPublic": {
+        "type": "object",
+        "description": "Poll resource returned by GET /api/polls/{id}; omits creatorId.",
+        "required": [
+          "id",
+          "title",
+          "isAnonymous",
+          "isPublished",
+          "isActive",
+          "showResults",
+          "expiresAt",
+          "createdAt",
+          "updatedAt",
+          "questions"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "isAnonymous": { "type": "boolean" },
+          "isPublished": { "type": "boolean" },
+          "isActive": { "type": "boolean" },
+          "showResults": { "type": "boolean" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "questions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PollQuestion" }
+          }
+        }
+      },
+      "PollRow": {
+        "type": "object",
+        "description": "Poll table row without nested questions (e.g. publish response).",
+        "required": [
+          "id",
+          "title",
+          "creatorId",
+          "isAnonymous",
+          "isPublished",
+          "isActive",
+          "showResults",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "creatorId": { "type": "string" },
+          "isAnonymous": { "type": "boolean" },
+          "isPublished": { "type": "boolean" },
+          "isActive": { "type": "boolean" },
+          "showResults": { "type": "boolean" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PollListItem": {
+        "allOf": [
+          { "$ref": "#/components/schemas/PollRow" },
+          {
+            "type": "object",
+            "required": ["responseCount"],
+            "properties": {
+              "responseCount": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Number of submitted responses"
+              }
+            }
+          }
+        ]
+      },
+      "PollListResponse": {
+        "type": "object",
+        "required": ["polls"],
+        "properties": {
+          "polls": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PollListItem" }
+          }
+        }
+      },
+      "SubmitResponseRequest": {
+        "type": "object",
+        "required": ["answers"],
+        "properties": {
+          "answers": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["questionId", "optionId"],
+              "properties": {
+                "questionId": { "type": "string", "minLength": 10, "maxLength": 40 },
+                "optionId": { "type": "string", "minLength": 10, "maxLength": 40 }
+              }
+            }
+          },
+          "timeToComplete": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional completion time in milliseconds or seconds (positive integer)"
+          }
+        }
+      },
+      "SubmitResponseResult": {
+        "type": "object",
+        "required": ["responseId", "showResults", "pollId"],
+        "properties": {
+          "responseId": { "type": "string" },
+          "showResults": { "type": "boolean" },
+          "pollId": { "type": "string" }
+        }
+      },
+      "AnalyticsQuestionOptionStat": {
+        "type": "object",
+        "required": ["id", "text", "count", "percent"],
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" },
+          "count": { "type": "integer", "minimum": 0 },
+          "percent": { "type": "integer", "minimum": 0, "maximum": 100 }
+        }
+      },
+      "AnalyticsQuestionStat": {
+        "type": "object",
+        "required": ["id", "text", "order", "isRequired", "completionRate", "options"],
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" },
+          "order": { "type": "integer" },
+          "isRequired": { "type": "boolean" },
+          "completionRate": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "options": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AnalyticsQuestionOptionStat" }
+          }
+        }
+      },
+      "AnalyticsTimelinePoint": {
+        "type": "object",
+        "required": ["bucket", "count"],
+        "properties": {
+          "bucket": { "type": "string", "description": "ISO bucket start for the time series" },
+          "count": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "AnalyticsPayload": {
+        "type": "object",
+        "required": [
+          "totalResponses",
+          "uniqueRespondents",
+          "completionRate",
+          "healthScore",
+          "questionStats",
+          "timeline"
+        ],
+        "properties": {
+          "totalResponses": { "type": "integer", "minimum": 0 },
+          "uniqueRespondents": { "type": "integer", "minimum": 0 },
+          "completionRate": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "healthScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "questionStats": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AnalyticsQuestionStat" }
+          },
+          "timeline": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AnalyticsTimelinePoint" }
+          }
+        }
+      },
+      "PublishedResults": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AnalyticsPayload" },
+          {
+            "type": "object",
+            "required": ["poll"],
+            "properties": {
+              "poll": {
+                "type": "object",
+                "required": ["title", "description"],
+                "properties": {
+                  "title": { "type": "string" },
+                  "description": { "type": ["string", "null"] }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "InsightsResponse": {
+        "type": "object",
+        "required": ["insight"],
+        "properties": {
+          "insight": {
+            "type": "string",
+            "description": "AI-generated or fallback text"
+          }
+        }
+      },
+      "DlqStats": {
+        "type": "object",
+        "required": ["processed", "failed", "pending"],
+        "properties": {
+          "processed": { "type": "integer", "example": 0 },
+          "failed": { "type": "integer", "minimum": 0 },
+          "pending": { "type": "integer", "example": 0 }
+        }
+      },
+      "DlqReplayResult": {
+        "type": "object",
+        "required": ["replayed"],
+        "properties": {
+          "replayed": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Messages replayed from DLQ for this poll during the scan window"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Register",
+        "description": "Creates an account and sets HTTP-only `refreshToken` cookie; returns JWT access token.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Registered",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccessTokenResponse" }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "schema": { "type": "string" },
+                "description": "refreshToken=…; HttpOnly; SameSite=Lax"
+              }
+            }
+          },
+          "409": {
+            "description": "Email already registered",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorMessage" },
+                "example": { "error": "Email already registered" }
+              }
+            }
+          },
+          "422": {
+            "description": "Body validation failed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Login",
+        "description": "Authenticates and sets `refreshToken` cookie; returns access token.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccessTokenResponse" }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "schema": { "type": "string" },
+                "description": "refreshToken cookie"
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "example": { "error": "Invalid email or password" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Refresh access token",
+        "description": "Reads `refreshToken` cookie, rotates refresh token, returns new access token.",
+        "responses": {
+          "200": {
+            "description": "New access token issued",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccessTokenResponse" }
+              }
+            },
+            "headers": {
+              "Set-Cookie": { "schema": { "type": "string" } }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid refresh token",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "missing": {
+                    "value": { "error": "No refresh token" }
+                  },
+                  "invalid": {
+                    "value": { "error": "Session expired, please login again" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/forgot-password": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Request password reset",
+        "description": "Always responds with success message if body is valid (no email enumeration). Rate limited to 5 requests per hour per IP.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ForgotPasswordRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledged",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ForgotPasswordResponse" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationError" }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts",
+            "content": {
+              "application/json": {
+                "example": { "error": "Too many reset attempts. Try again later." }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/reset-password": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Reset password",
+        "description": "Completes reset using token from email link.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ResetPasswordRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OkResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired token",
+            "content": {
+              "application/json": {
+                "example": { "error": "Invalid or expired reset link" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Logout",
+        "description": "Invalidates refresh token server-side (if cookie present) and clears cookie.",
+        "responses": {
+          "200": {
+            "description": "Logged out",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OkResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Current user",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Current authenticated user",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MeResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "missing": { "value": { "error": "Unauthorized" } },
+                  "bad": { "value": { "error": "Invalid token" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/google": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Start Google OAuth",
+        "description": "Redirects to Google consent screen (browser flow).",
+        "responses": {
+          "302": {
+            "description": "Redirect to Google"
+          }
+        }
+      }
+    },
+    "/api/auth/google/callback": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Google OAuth callback",
+        "description": "On success: sets `refreshToken` cookie and redirects to `CLIENT_URL/auth/callback?token=<accessToken>`. On failure redirects to `CLIENT_URL/login?error=oauth`.",
+        "responses": {
+          "302": {
+            "description": "Redirect to SPA with token or error"
+          }
+        }
+      }
+    },
+    "/api/polls": {
+      "post": {
+        "tags": ["Polls"],
+        "summary": "Create poll",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreatePollRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Poll created with nested questions and options",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Poll" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorMessage" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationError" }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": ["Polls"],
+        "summary": "List my polls",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Polls for the authenticated user with response counts",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PollListResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorMessage" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/polls/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" },
+          "description": "Poll ID (cuid)"
+        }
+      ],
+      "get": {
+        "tags": ["Polls"],
+        "summary": "Get poll (public)",
+        "description": "Returns poll with questions; omits `creatorId`. May flip `isActive` if expired.",
+        "responses": {
+          "200": {
+            "description": "Poll",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PollPublic" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "example": { "error": "Resource not found" }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["Polls"],
+        "summary": "Update poll metadata",
+        "description": "Owner only. Does not modify questions.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdatePollRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated poll with nested relations",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Poll" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorMessage" }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the owner",
+            "content": {
+              "application/json": {
+                "example": { "error": "Access denied" }
+              }
+            }
+          },
+          "404": {
+            "description": "Poll not found",
+            "content": {
+              "application/json": {
+                "example": { "error": "Resource not found" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationError" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Polls"],
+        "summary": "Delete poll",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorMessage" }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the owner",
+            "content": {
+              "application/json": {
+                "example": { "error": "Access denied" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "example": { "error": "Resource not found" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/polls/{id}/publish": {
+      "post": {
+        "tags": ["Polls"],
+        "summary": "Publish poll",
+        "description": "Owner only. Sets `isPublished` to true. Response body is the poll row only (no nested questions).",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Published",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PollRow" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorMessage" }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "example": { "error": "Access denied" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "example": { "error": "Resource not found" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/polls/{id}/responses": {
+      "post": {
+        "tags": ["Responses"],
+        "summary": "Submit responses",
+        "description": "Submit answers for a poll. Optional `Authorization: Bearer` ties response to user when poll is not anonymous. Optional `X-Fingerprint` dedupes anonymous submissions per poll for 24h. Subject to submit rate limiting.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Poll ID"
+          },
+          {
+            "name": "X-Fingerprint",
+            "in": "header",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Client fingerprint for anonymous deduplication"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SubmitResponseRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response recorded",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SubmitResponseResult" }
+              }
+            }
+          },
+          "401": {
+            "description": "Non-anonymous poll requires authenticated respondent",
+            "content": {
+              "application/json": {
+                "example": { "error": "Authentication required for this poll" }
+              }
+            }
+          },
+          "404": {
+            "description": "Poll not found",
+            "content": {
+              "application/json": {
+                "example": { "error": "Resource not found" }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate fingerprint submission or conflict",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "duplicate": {
+                    "value": { "error": "You have already responded to this poll" }
+                  }
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Poll inactive or expired",
+            "content": {
+              "application/json": {
+                "example": { "error": "This poll has expired" }
+              }
+            }
+          },
+          "422": {
+            "description": "Schema or business validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/ValidationError" },
+                    { "$ref": "#/components/schemas/ValidationErrorDomain" }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many submissions (rate limit)"
+          }
+        }
+      }
+    },
+    "/api/polls/{id}/analytics": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Poll analytics (owner)",
+        "description": "Owner only. Cached briefly in Redis.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregated analytics",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AnalyticsPayload" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorMessage" }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the owner",
+            "content": {
+              "application/json": {
+                "example": { "error": "Access denied" }
+              }
+            }
+          },
+          "404": {
+            "description": "Poll not found",
+            "content": {
+              "application/json": {
+                "example": { "error": "Resource not found" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/polls/{id}/results": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Published results",
+        "description": "Public when `isPublished` is true; returns analytics plus poll title/description.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Results",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PublishedResults" }
+              }
+            }
+          },
+          "403": {
+            "description": "Poll exists but results not published",
+            "content": {
+              "application/json": {
+                "example": { "error": "Results not yet published" }
+              }
+            }
+          },
+          "404": {
+            "description": "Poll not found",
+            "content": {
+              "application/json": {
+                "example": { "error": "Resource not found" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/polls/{id}/insights": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "AI insights",
+        "description": "Owner only. May return placeholder if fewer than 5 responses or OpenAI not configured.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Insight text",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InsightsResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorMessage" }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "example": { "error": "Access denied" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "example": { "error": "Resource not found" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/polls/{id}/dlq-stats": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "DLQ message estimate",
+        "description": "Owner only. Returns placeholder processed/pending and Kafka DLQ offset estimate as `failed`.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DLQ stats",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DlqStats" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorMessage" }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "example": { "error": "Access denied" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "example": { "error": "Resource not found" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/polls/{id}/dlq-replay": {
+      "post": {
+        "tags": ["Analytics"],
+        "summary": "Replay DLQ messages",
+        "description": "Owner only. Subscribes to the responses DLQ for ~2.5s and replays matching messages for this poll back to the main topic.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Replay finished",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DlqReplayResult" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorMessage" }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "example": { "error": "Access denied" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "example": { "error": "Resource not found" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

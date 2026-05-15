@@ -1,0 +1,24 @@
+{
+  "name": "pulseBoard",
+  "private": true,
+  "optionalDependencies": {
+    "@rollup/rollup-linux-arm64-gnu": "4.60.3",
+    "@rollup/rollup-linux-x64-gnu": "4.60.3"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @pulseBoard/api\" \"npm run dev -w @pulseBoard/web\"",
+    "build": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:infra": "docker compose -f docker-compose.infra.yml up -d",
+    "docker:infra:down": "docker compose -f docker-compose.infra.yml down"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
