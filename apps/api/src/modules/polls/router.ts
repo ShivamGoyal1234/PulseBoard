@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { eq } from 'drizzle-orm'
 import { requireAuth } from '../../middleware/auth'
+import { aiGenerateRateLimiter } from '../../middleware/rateLimiter'
 import { validate } from '../../middleware/validate'
 import { createPollSchema, updatePollSchema } from './schema'
 import { pollService } from './service'
@@ -95,7 +96,7 @@ router.post('/:id/publish', requireAuth, async (req, res, next) => {
   }
 })
 
-router.post('/generate', requireAuth, async (req, res, next) => {
+router.post('/generate', requireAuth, aiGenerateRateLimiter, async (req, res, next) => {
   try {
     const prompt =
       typeof req.body?.prompt === 'string' ? req.body.prompt : ''

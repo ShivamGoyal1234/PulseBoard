@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { motion } from 'framer-motion'
+import axios from 'axios'
 import { ArrowRight, Sparkles, Wand2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { pollsApi } from '../../api/polls'
@@ -24,23 +25,44 @@ const SUGGESTIONS = [
   'Product priorities for the next sprint',
 ]
 
+const GENERATE_COOLDOWN_MS = 2000
+
 export function AiPollGenerator({ onApply }: AiPollGeneratorProps) {
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
+  const lastGenerateAt = useRef(0)
 
   const submit = async (text: string) => {
+    if (busy) return
+
     const cleaned = text.trim()
     if (cleaned.length < 4) {
       toast.error('Describe your poll in a few words first')
       return
     }
+
+    const now = Date.now()
+    if (now - lastGenerateAt.current < GENERATE_COOLDOWN_MS) {
+      toast.error('Please wait a moment before generating again')
+      return
+    }
+
     setBusy(true)
+    lastGenerateAt.current = now
     try {
       const draft = await pollsApi.generateDraft(cleaned)
       onApply(draft)
       toast.success('Draft ready — review and edit before publishing')
-    } catch {
-      toast.error('Could not generate a draft. Try again in a moment.')
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 429) {
+        const msg =
+          typeof err.response.data?.error === 'string'
+            ? err.response.data.error
+            : 'Too many requests. Wait a few minutes and try again.'
+        toast.error(msg)
+      } else {
+        toast.error('Could not generate a draft. Try again in a moment.')
+      }
     } finally {
       setBusy(false)
     }

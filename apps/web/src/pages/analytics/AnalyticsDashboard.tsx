@@ -177,7 +177,8 @@ export function AnalyticsDashboard() {
   } = useQuery({
     queryKey: ['analytics', pollId],
     queryFn: () => pollsApi.getAnalytics(pollId),
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
     enabled: Boolean(pollId),
   })
 

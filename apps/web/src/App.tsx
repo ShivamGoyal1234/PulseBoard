@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import axios from 'axios'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
@@ -21,7 +22,21 @@ import { ResultsPage } from './pages/results/ResultsPage'
 import { NotFound } from './pages/NotFound'
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) => {
+        if (
+          axios.isAxiosError(error) &&
+          (error.response?.status === 429 || error.response?.status === 401)
+        ) {
+          return false
+        }
+        return failureCount < 1
+      },
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
+  },
 })
 
 function useBootstrap() {
