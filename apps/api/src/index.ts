@@ -46,10 +46,15 @@ async function bootstrap(): Promise<void> {
   app.use(errorHandler)
 
   initSocket(server)
-  await connectProducer()
 
-  await startResponseConsumer()
-  await startRealtimeConsumer()
+  const PORT = process.env.PORT ?? '3001'
+  await new Promise<void>((resolve, reject) => {
+    server.listen(Number(PORT), () => {
+      console.log(`API running on :${PORT}`)
+      resolve()
+    })
+    server.on('error', reject)
+  })
 
   setInterval(() => {
     void db
@@ -58,10 +63,13 @@ async function bootstrap(): Promise<void> {
       .where(and(eq(polls.isActive, true), lt(polls.expiresAt, new Date())))
   }, 60_000)
 
-  const PORT = process.env.PORT ?? '3001'
-  server.listen(Number(PORT), () => {
-    console.log(`API running on :${PORT}`)
-  })
+  try {
+    await connectProducer()
+    await startResponseConsumer()
+    await startRealtimeConsumer()
+  } catch (err) {
+    console.error('Kafka initialization failed (HTTP API is still available):', err)
+  }
 
   const shutdown = async () => {
     try {
