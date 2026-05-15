@@ -93,11 +93,9 @@ export function AiPollGenerator({ onApply }: AiPollGeneratorProps) {
           </div>
         </div>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            void submit(prompt)
-          }}
+        <motion.div
+          role="group"
+          aria-label="AI poll generator"
           className="space-y-3"
         >
           <label className="sr-only" htmlFor="ai-prompt">
@@ -108,6 +106,12 @@ export function AiPollGenerator({ onApply }: AiPollGeneratorProps) {
               id="ai-prompt"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  void submit(prompt)
+                }
+              }}
               placeholder="e.g. Run a team retro for the engineering squad — what went well, what didn't, and what to try next sprint"
               maxLength={500}
               rows={3}
@@ -119,9 +123,10 @@ export function AiPollGenerator({ onApply }: AiPollGeneratorProps) {
                 {prompt.length}/500
               </span>
               <button
-                type="submit"
+                type="button"
                 disabled={busy || prompt.trim().length < 4}
                 aria-label="Generate poll"
+                onClick={() => void submit(prompt)}
                 className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-txt-inverse disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 style={{
                   background:
@@ -163,7 +168,7 @@ export function AiPollGenerator({ onApply }: AiPollGeneratorProps) {
               </button>
             ))}
           </div>
-        </form>
+        </motion.div>
       </div>
     </motion.section>
   )
