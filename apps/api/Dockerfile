@@ -31,5 +31,6 @@ COPY apps/web/package.json ./apps/web/
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY apps/api/drizzle ./apps/api/drizzle
 
 CMD ["node", "apps/api/dist/index.js"]

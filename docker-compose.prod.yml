@@ -9,7 +9,25 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - '${HOST_POSTGRES_PORT:-5433}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-pulseBoard} -d ${POSTGRES_DB:-pulseBoard}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: production
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pulseBoard}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pulseBoard}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['node', 'apps/api/dist/db/migrate.js']
+    restart: 'no'
 
   redis:
     image: redis:7-alpine
