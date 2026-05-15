@@ -126,7 +126,11 @@ export function AiPollGenerator({ onApply }: AiPollGeneratorProps) {
                 type="button"
                 disabled={busy || prompt.trim().length < 4}
                 aria-label="Generate poll"
-                onClick={() => void submit(prompt)}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  void submit(prompt)
+                }}
                 className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-txt-inverse disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 style={{
                   background:

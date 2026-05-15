@@ -395,11 +395,7 @@ export function PollBuilder({ mode = 'create' }: PollBuilderProps) {
         <div className="hidden md:block">
           <Sidebar />
         </div>
-        <form
-          className="flex-1 min-w-0 flex flex-col"
-          onSubmit={handleSubmit(onSubmit)}
-          noValidate
-        >
+        <motion.div className="flex-1 min-w-0 flex flex-col">
           <section className="relative overflow-hidden border-b border-border">
             <div
               aria-hidden
@@ -480,7 +476,12 @@ export function PollBuilder({ mode = 'create' }: PollBuilderProps) {
                     <Save size={16} />
                     Save draft
                   </Button>
-                  <Button type="submit" loading={saving} disabled={!ready}>
+                  <Button
+                    type="submit"
+                    form="poll-builder-form"
+                    loading={saving}
+                    disabled={!ready}
+                  >
                     {isEdit ? (
                       <>
                         <CheckCircle2 size={16} /> Save changes
@@ -496,33 +497,44 @@ export function PollBuilder({ mode = 'create' }: PollBuilderProps) {
             </div>
           </section>
 
-          <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-7 sm:py-9">
+          {!isEdit ? (
+            <motion.div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-7 sm:pt-9">
+              <AiPollGenerator
+                onApply={(draft) => {
+                  reset({
+                    title: draft.title ?? '',
+                    description: draft.description ?? '',
+                    isAnonymous: values.isAnonymous,
+                    showResults: values.showResults,
+                    expiresAt: values.expiresAt,
+                    questions: draft.questions.map((q, qi) => ({
+                      text: q.text,
+                      isRequired: q.isRequired,
+                      order: qi,
+                      options: q.options.map((o, oi) => ({
+                        text: o.text,
+                        order: oi,
+                      })),
+                    })),
+                  })
+                }}
+              />
+            </motion.div>
+          ) : null}
+
+          <form
+            id="poll-builder-form"
+            className="flex flex-col flex-1 min-w-0"
+            onSubmit={handleSubmit(onSubmit)}
+            noValidate
+          >
+          <div
+            className={`max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pb-7 sm:pb-9 ${
+              isEdit ? 'py-7 sm:py-9' : 'pt-6'
+            }`}
+          >
             <div className="grid grid-cols-12 gap-6">
               <div className="col-span-12 lg:col-span-8 space-y-6 pb-32 lg:pb-10">
-                {/* AI generator — create mode only */}
-                {!isEdit ? (
-                  <AiPollGenerator
-                    onApply={(draft) => {
-                      reset({
-                        title: draft.title ?? '',
-                        description: draft.description ?? '',
-                        isAnonymous: values.isAnonymous,
-                        showResults: values.showResults,
-                        expiresAt: values.expiresAt,
-                        questions: draft.questions.map((q, qi) => ({
-                          text: q.text,
-                          isRequired: q.isRequired,
-                          order: qi,
-                          options: q.options.map((o, oi) => ({
-                            text: o.text,
-                            order: oi,
-                          })),
-                        })),
-                      })
-                    }}
-                  />
-                ) : null}
-
                 {/* Section 1: Basics */}
                 <motion.section
                   initial={{ opacity: 0, y: 10 }}
@@ -805,6 +817,7 @@ export function PollBuilder({ mode = 'create' }: PollBuilderProps) {
             </Button>
           </div>
         </form>
+        </motion.div>
       </div>
     </FormProvider>
   )
