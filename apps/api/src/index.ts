@@ -1,9 +1,8 @@
 import 'dotenv/config'
+import path from 'node:path'
+import http from 'http'
 import { loadEnv } from './config/env'
 import express from 'express'
-
-loadEnv()
-import http from 'http'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
@@ -19,12 +18,17 @@ import ogRouter from './modules/og/router'
 import { setupSwagger } from './swagger'
 import { errorHandler } from './middleware/errorHandler'
 import { rateLimiter } from './middleware/rateLimiter'
+import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { db } from './db'
 import { polls } from './db/schema'
 import { startResponseConsumer } from './kafka/consumers/responseConsumer'
 import { startRealtimeConsumer } from './kafka/consumers/realtimeConsumer'
 
 async function bootstrap(): Promise<void> {
+  loadEnv()
+  const migrationsFolder = path.join(__dirname, '../drizzle')
+  await migrate(db, { migrationsFolder })
+
   const app = express()
   const server = http.createServer(app)
 
