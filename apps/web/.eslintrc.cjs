@@ -8,7 +8,11 @@ module.exports = {
     project: false,
   },
   plugins: ['@typescript-eslint'],
-  extends: ['eslint:recommended', 'plugin:@typescript-eslint/recommended'],
+  extends: [
+    'eslint:recommended',
+    'plugin:@typescript-eslint/recommended',
+    'plugin:react-hooks/recommended',
+  ],
   env: { browser: true, es2022: true },
   ignorePatterns: ['dist', 'node_modules'],
   rules: {
