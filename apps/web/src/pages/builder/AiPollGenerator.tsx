@@ -116,7 +116,8 @@ export function AiPollGenerator({ onApply }: AiPollGeneratorProps) {
               maxLength={500}
               rows={3}
               disabled={busy}
-              className="w-full min-h-[88px] px-3.5 py-2.5 pr-32 bg-bg-elevated/80 backdrop-blur border border-border rounded-xl text-sm text-txt-primary placeholder:text-txt-tertiary focus:outline-none focus:border-border-focus focus:ring-2 focus:ring-brand/20"
+              className="w-full min-h-[88px] px-3.5 py-2.5 pr-32 bg-bg-input border border-border rounded-xl text-sm text-txt-primary caret-brand placeholder:text-txt-tertiary focus:outline-none focus:border-border-focus focus:ring-2 focus:ring-brand/20"
+              style={{ color: 'var(--txt-primary)' }}
             />
             <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">
               <span className="text-[10px] text-txt-tertiary tabular-nums hidden sm:inline">
