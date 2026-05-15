@@ -7,10 +7,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pulseBoard}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - '${HOST_POSTGRES_PORT:-5433}:5432'
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
+    ports:
+      - '${HOST_REDIS_PORT:-6380}:6379'
     restart: unless-stopped
 
   zookeeper:
@@ -27,11 +31,14 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://127.0.0.1:${HOST_KAFKA_PORT:-9093}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - '${HOST_KAFKA_PORT:-9093}:9092'
     restart: unless-stopped
 
   api:
@@ -40,7 +47,8 @@ services:
       dockerfile: apps/api/Dockerfile
       target: production
     ports:
-      - '3001:3001'
+      # Inside the stack nginx still reaches api:3001; only the host binding changes.
+      - '${HOST_API_PORT:-3101}:3001'
     env_file:
       - .env.production
     environment:
