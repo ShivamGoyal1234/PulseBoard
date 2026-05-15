@@ -1,7 +1,6 @@
 import { Router } from 'express'
 import jwt from 'jsonwebtoken'
 import { validate } from '../../middleware/validate'
-import { submitRateLimiter } from '../../middleware/rateLimiter'
 import { submitResponseSchema } from './schema'
 import { responseService } from './service'
 
@@ -9,7 +8,6 @@ const router = Router()
 
 router.post(
   '/:id/responses',
-  submitRateLimiter,
   validate(submitResponseSchema),
   async (req, res, next) => {
     try {

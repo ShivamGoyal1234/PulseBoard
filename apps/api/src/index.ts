@@ -17,7 +17,6 @@ import analyticsRouter from './modules/analytics/router'
 import ogRouter from './modules/og/router'
 import { setupSwagger } from './swagger'
 import { errorHandler } from './middleware/errorHandler'
-import { rateLimiter } from './middleware/rateLimiter'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { db } from './db'
 import { polls } from './db/schema'
@@ -37,7 +36,6 @@ async function bootstrap(): Promise<void> {
   app.use(express.json())
   app.use(cookieParser())
   app.use(passport.initialize())
-  app.use(rateLimiter)
 
   app.use('/api/auth', authRouter)
   app.use('/api/polls', pollsRouter)

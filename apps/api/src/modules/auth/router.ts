@@ -4,7 +4,6 @@ import {
   type Response,
   type NextFunction,
 } from 'express'
-import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import passport from '../../config/passport'
 import { authService, issueTokens } from './service'
@@ -19,14 +18,6 @@ import {
 import type { User } from '../../db/schema'
 
 const router = Router()
-
-const forgotPasswordLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many reset attempts. Try again later.' },
-})
 
 const COOKIE_OPTS = {
   httpOnly: true,
@@ -78,7 +69,6 @@ router.post('/refresh', async (req, res, next) => {
 
 router.post(
   '/forgot-password',
-  forgotPasswordLimiter,
   validate(forgotPasswordSchema),
   async (req, res, next) => {
     try {
